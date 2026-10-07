@@ -31,20 +31,9 @@ public interface TelegramClient {
 
     void getChatHistory(long chatId, long fromMessageId, int offset, int limit,
                         TelegramResult<List<TelegramMessage>> result);
-    void searchChatMessages(long chatId, String query, long fromMessageId, int offset, int limit,
-                            TelegramResult<List<TelegramMessage>> result);
 
     void sendText(long chatId, String text, TelegramResult<TelegramMessage> result);
     void sendPhoto(long chatId, String localPath, String caption, TelegramResult<TelegramMessage> result);
-    void sendVideo(long chatId, String localPath, String caption, TelegramResult<TelegramMessage> result);
-    void sendDocument(long chatId, String localPath, String caption, TelegramResult<TelegramMessage> result);
-    void sendPhotoAlbum(long chatId, List<String> localPaths, TelegramResult<List<TelegramMessage>> result);
-
-    void editMessageText(long chatId, long messageId, String text, TelegramResult<TelegramMessage> result);
-    void forwardMessages(long toChatId, long fromChatId, long[] messageIds,
-                         TelegramResult<List<TelegramMessage>> result);
-    void deleteMessages(long chatId, long[] messageIds, boolean revoke, TelegramResult<Void> result);
-
     void downloadFile(int fileId, int priority, TelegramResult<String> result);
 
     void openChat(long chatId);
