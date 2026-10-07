@@ -4,12 +4,12 @@ public final class TelegramChat {
     public final long id;
     public final String title;
     public final int unreadCount;
-    public final int lastMessageId;
+    public final long lastMessageId;
 
-    public TelegramChat(long id, String title, int unreadCount, int lastMessageId) {
+    public TelegramChat(long id, String title, int unreadCount, long lastMessageId) {
         this.id = id;
         this.title = title == null ? "" : title;
-        this.unreadCount = unreadCount;
-        this.lastMessageId = lastMessageId;
+        this.unreadCount = Math.max(0, unreadCount);
+        this.lastMessageId = Math.max(0L, lastMessageId);
     }
 }
