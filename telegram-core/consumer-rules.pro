@@ -1,0 +1,2 @@
+-keep public interface com.samuray.telegram.core.** { *; }
+-keep public class com.samuray.telegram.core.** { *; }
