@@ -12,17 +12,35 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build libraries
+
+      - name: Build libraries and tests
         run: gradle clean build --stacktrace --warning-mode all
+
+      - name: Build sample APK
+        run: gradle :telegram-sample:assembleDebug --stacktrace --warning-mode all
+
+      - name: Verify sample APK
+        run: |
+          test -s telegram-sample/build/outputs/apk/debug/telegram-sample-debug.apk
+          ls -lh telegram-sample/build/outputs/apk/debug/telegram-sample-debug.apk
+
+      - name: Upload sample APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-core-sample
+          path: telegram-sample/build/outputs/apk/debug/telegram-sample-debug.apk
