@@ -21,11 +21,14 @@ public interface TelegramClient {
     void setRegistrationName(String firstName, String lastName, TelegramResult<Void> result);
     void setEmailAddress(String emailAddress, TelegramResult<Void> result);
     void setEmailCode(String code, TelegramResult<Void> result);
+    void resendAuthenticationCode(TelegramResult<Void> result);
+    void requestQrCodeAuthentication(TelegramResult<Void> result);
 
     void getMe(TelegramResult<TelegramUser> result);
-
-    void getChats(long offsetOrder, long offsetChatId, int limit, TelegramResult<List<TelegramChat>> result);
+    void getChats(int limit, TelegramResult<List<TelegramChat>> result);
+    void loadChats(int limit, TelegramResult<Void> result);
     void searchChats(String query, int limit, TelegramResult<List<TelegramChat>> result);
+
     void getChatHistory(long chatId, long fromMessageId, int offset, int limit,
                         TelegramResult<List<TelegramMessage>> result);
 
@@ -35,7 +38,7 @@ public interface TelegramClient {
 
     void openChat(long chatId);
     void closeChat(long chatId);
-    void viewMessages(long chatId, int[] messageIds);
+    void viewMessages(long chatId, long[] messageIds);
 
     void logout(TelegramResult<Void> result);
     void close();
