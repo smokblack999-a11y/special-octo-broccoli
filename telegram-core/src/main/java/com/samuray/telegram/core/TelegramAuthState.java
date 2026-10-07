@@ -3,6 +3,7 @@ package com.samuray.telegram.core;
 public enum TelegramAuthState {
     WAIT_PARAMETERS,
     WAIT_PHONE_NUMBER,
+    WAIT_PREMIUM_PURCHASE,
     WAIT_CODE,
     WAIT_PASSWORD,
     WAIT_EMAIL_ADDRESS,
