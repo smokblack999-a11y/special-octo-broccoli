@@ -1,0 +1,16 @@
+package com.samuray.telegram.core;
+
+public enum TelegramAuthState {
+    WAIT_PARAMETERS,
+    WAIT_PHONE_NUMBER,
+    WAIT_CODE,
+    WAIT_PASSWORD,
+    WAIT_EMAIL_ADDRESS,
+    WAIT_EMAIL_CODE,
+    WAIT_REGISTRATION,
+    WAIT_OTHER_DEVICE_CONFIRMATION,
+    READY,
+    LOGGING_OUT,
+    CLOSING,
+    CLOSED
+}
