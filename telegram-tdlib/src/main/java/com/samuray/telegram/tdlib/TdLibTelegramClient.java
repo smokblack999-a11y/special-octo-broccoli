@@ -213,7 +213,7 @@ public final class TdLibTelegramClient implements TelegramClient {
     @Override
     public void searchChats(String query, int limit, TelegramResult<List<TelegramChat>> result) {
         requireClient();
-        sendRaw(new TdApi.SearchChats(query == null ? "" : query, limit), new ResultAdapter() {
+        sendRaw(new TdApi.SearchChats(query == null ? "" : query, null, limit), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
                 collectChats(((TdApi.Chats) object).chatIds, result);
@@ -266,7 +266,7 @@ public final class TdLibTelegramClient implements TelegramClient {
     public void getChatHistory(long chatId, long fromMessageId, int offset, int limit,
                                final TelegramResult<List<TelegramMessage>> result) {
         requireClient();
-        sendRaw(new TdApi.GetChatHistory(chatId, fromMessageId, offset, limit), new ResultAdapter() {
+        sendRaw(new TdApi.GetChatHistory(chatId, fromMessageId, offset, limit, false), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
                 TdApi.Messages messages = (TdApi.Messages) object;
