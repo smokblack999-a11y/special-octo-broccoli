@@ -22,6 +22,8 @@ public interface TelegramClient {
     void setEmailAddress(String emailAddress, TelegramResult<Void> result);
     void setEmailCode(String code, TelegramResult<Void> result);
 
+    void getMe(TelegramResult<TelegramUser> result);
+
     void getChats(long offsetOrder, long offsetChatId, int limit, TelegramResult<List<TelegramChat>> result);
     void searchChats(String query, int limit, TelegramResult<List<TelegramChat>> result);
     void getChatHistory(long chatId, long fromMessageId, int offset, int limit,
