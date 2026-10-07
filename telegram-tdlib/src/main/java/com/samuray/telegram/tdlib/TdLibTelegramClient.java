@@ -6,6 +6,7 @@ import com.samuray.telegram.core.TelegramClient;
 import com.samuray.telegram.core.TelegramConfig;
 import com.samuray.telegram.core.TelegramMessage;
 import com.samuray.telegram.core.TelegramResult;
+import com.samuray.telegram.core.TelegramUser;
 
 import org.drinkless.tdlib.Client;
 import org.drinkless.tdlib.TdApi;
@@ -13,6 +14,8 @@ import org.drinkless.tdlib.TdApi;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class TdLibTelegramClient implements TelegramClient {
     private final TelegramConfig config;
@@ -46,6 +49,14 @@ public final class TdLibTelegramClient implements TelegramClient {
     private void handleUpdate(TdApi.Object object) {
         if (object instanceof TdApi.UpdateAuthorizationState) {
             handleAuthorizationState(((TdApi.UpdateAuthorizationState) object).authorizationState);
+        } else if (object instanceof TdApi.UpdateNewChat) {
+            notifyChat(((TdApi.UpdateNewChat) object).chat);
+        } else if (object instanceof TdApi.UpdateChatTitle
+                || object instanceof TdApi.UpdateChatLastMessage
+                || object instanceof TdApi.UpdateChatReadInbox
+                || object instanceof TdApi.UpdateChatUnreadMentionCount) {
+            long chatId = extractChatId(object);
+            if (chatId != 0) refreshChat(chatId);
         } else if (object instanceof TdApi.UpdateNewMessage) {
             notifyMessage(((TdApi.UpdateNewMessage) object).message);
         } else if (object instanceof TdApi.UpdateMessageSendSucceeded) {
@@ -53,21 +64,28 @@ public final class TdLibTelegramClient implements TelegramClient {
         } else if (object instanceof TdApi.UpdateMessageSendFailed) {
             TdApi.UpdateMessageSendFailed update = (TdApi.UpdateMessageSendFailed) object;
             notifyError(String.valueOf(update.error.code), update.error.message);
-        } else if (object instanceof TdApi.UpdateChat) {
-            notifyChat(((TdApi.UpdateChat) object).chat);
         }
+    }
+
+    private long extractChatId(TdApi.Object object) {
+        if (object instanceof TdApi.UpdateChatTitle) return ((TdApi.UpdateChatTitle) object).chatId;
+        if (object instanceof TdApi.UpdateChatLastMessage) return ((TdApi.UpdateChatLastMessage) object).chatId;
+        if (object instanceof TdApi.UpdateChatReadInbox) return ((TdApi.UpdateChatReadInbox) object).chatId;
+        if (object instanceof TdApi.UpdateChatUnreadMentionCount) return ((TdApi.UpdateChatUnreadMentionCount) object).chatId;
+        return 0L;
     }
 
     private void handleAuthorizationState(TdApi.AuthorizationState state) {
         if (state instanceof TdApi.AuthorizationStateWaitTdlibParameters) {
             setAuthState(TelegramAuthState.WAIT_PARAMETERS);
             TdApi.SetTdlibParameters request = new TdApi.SetTdlibParameters();
+            request.useTestDc = false;
             request.databaseDirectory = config.databaseDirectory.getAbsolutePath();
             request.filesDirectory = config.filesDirectory.getAbsolutePath();
-            request.useMessageDatabase = true;
-            request.useChatInfoDatabase = true;
+            request.databaseEncryptionKey = config.databaseEncryptionKey.clone();
             request.useFileDatabase = true;
-            request.useChatDatabase = true;
+            request.useChatInfoDatabase = true;
+            request.useMessageDatabase = true;
             request.useSecretChats = true;
             request.apiId = config.apiId;
             request.apiHash = config.apiHash;
@@ -75,10 +93,11 @@ public final class TdLibTelegramClient implements TelegramClient {
             request.deviceModel = config.deviceModel;
             request.systemVersion = config.systemVersion;
             request.applicationVersion = config.applicationVersion;
-            request.enableStorageOptimizer = true;
             sendRaw(request, null);
         } else if (state instanceof TdApi.AuthorizationStateWaitPhoneNumber) {
             setAuthState(TelegramAuthState.WAIT_PHONE_NUMBER);
+        } else if (state instanceof TdApi.AuthorizationStateWaitPremiumPurchase) {
+            setAuthState(TelegramAuthState.WAIT_PREMIUM_PURCHASE);
         } else if (state instanceof TdApi.AuthorizationStateWaitCode) {
             setAuthState(TelegramAuthState.WAIT_CODE);
         } else if (state instanceof TdApi.AuthorizationStateWaitPassword) {
@@ -100,6 +119,7 @@ public final class TdLibTelegramClient implements TelegramClient {
             setAuthState(TelegramAuthState.CLOSING);
         } else if (state instanceof TdApi.AuthorizationStateClosed) {
             setAuthState(TelegramAuthState.CLOSED);
+            client = null;
         }
     }
 
@@ -136,23 +156,29 @@ public final class TdLibTelegramClient implements TelegramClient {
     @Override
     public void setEmailCode(String code, TelegramResult<Void> result) {
         requireClient();
-        sendRaw(new TdApi.CheckAuthenticationEmailCode(
-                new TdApi.EmailAddressAuthenticationCode(code)), wrapVoid(result));
+        sendRaw(new TdApi.CheckAuthenticationEmailCode(new TdApi.EmailAddressAuthenticationCode(code)),
+                wrapVoid(result));
     }
 
     @Override
-    public void getChats(long offsetOrder, long offsetChatId, int limit,
-                         final TelegramResult<List<TelegramChat>> result) {
+    public void resendAuthenticationCode(TelegramResult<Void> result) {
         requireClient();
-        sendRaw(new TdApi.GetChats(offsetOrder, offsetChatId, limit), new ResultAdapter() {
+        sendRaw(new TdApi.ResendAuthenticationCode(null), wrapVoid(result));
+    }
+
+    @Override
+    public void requestQrCodeAuthentication(TelegramResult<Void> result) {
+        requireClient();
+        sendRaw(new TdApi.RequestQrCodeAuthentication(new long[0]), wrapVoid(result));
+    }
+
+    @Override
+    public void getMe(final TelegramResult<TelegramUser> result) {
+        requireClient();
+        sendRaw(new TdApi.GetMe(), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
-                TdApi.Chats chats = (TdApi.Chats) object;
-                ArrayList<TelegramChat> out = new ArrayList<>(chats.chatIds.length);
-                for (long id : chats.chatIds) {
-                    requestChat(id, out);
-                }
-                result.onSuccess(Collections.unmodifiableList(out));
+                if (result != null) result.onSuccess(mapUser((TdApi.User) object));
             }
 
             @Override
@@ -162,27 +188,35 @@ public final class TdLibTelegramClient implements TelegramClient {
         });
     }
 
-    private void requestChat(final long id, final List<TelegramChat> target) {
-        sendRaw(new TdApi.GetChat(id), new ResultAdapter() {
+    @Override
+    public void loadChats(int limit, TelegramResult<Void> result) {
+        requireClient();
+        sendRaw(new TdApi.LoadChats(null, limit), wrapVoid(result));
+    }
+
+    @Override
+    public void getChats(int limit, TelegramResult<List<TelegramChat>> result) {
+        requireClient();
+        sendRaw(new TdApi.GetChats(null, limit), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
-                TdApi.Chat chat = (TdApi.Chat) object;
-                target.add(mapChat(chat));
-                notifyChat(chat);
+                collectChats(((TdApi.Chats) object).chatIds, result);
+            }
+
+            @Override
+            public void onFailure(TdApi.Error error) {
+                if (result != null) result.onError(String.valueOf(error.code), error.message);
             }
         });
     }
 
     @Override
-    public void searchChats(String query, int limit, final TelegramResult<List<TelegramChat>> result) {
+    public void searchChats(String query, int limit, TelegramResult<List<TelegramChat>> result) {
         requireClient();
         sendRaw(new TdApi.SearchChats(query == null ? "" : query, limit), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
-                TdApi.Chats chats = (TdApi.Chats) object;
-                ArrayList<TelegramChat> out = new ArrayList<>(chats.chatIds.length);
-                for (long id : chats.chatIds) requestChat(id, out);
-                result.onSuccess(Collections.unmodifiableList(out));
+                collectChats(((TdApi.Chats) object).chatIds, result);
             }
 
             @Override
@@ -190,6 +224,42 @@ public final class TdLibTelegramClient implements TelegramClient {
                 if (result != null) result.onError(String.valueOf(error.code), error.message);
             }
         });
+    }
+
+    private void collectChats(final long[] chatIds, final TelegramResult<List<TelegramChat>> result) {
+        if (result == null) return;
+        if (chatIds == null || chatIds.length == 0) {
+            result.onSuccess(Collections.emptyList());
+            return;
+        }
+
+        final ArrayList<TelegramChat> output =
+                new ArrayList<>(Collections.nCopies(chatIds.length, (TelegramChat) null));
+        final AtomicInteger remaining = new AtomicInteger(chatIds.length);
+        final AtomicBoolean finished = new AtomicBoolean(false);
+
+        for (int i = 0; i < chatIds.length; i++) {
+            final int index = i;
+            final long chatId = chatIds[i];
+            sendRaw(new TdApi.GetChat(chatId), new ResultAdapter() {
+                @Override
+                public void onSuccess(TdApi.Object object) {
+                    if (finished.get()) return;
+                    output.set(index, mapChat((TdApi.Chat) object));
+                    if (remaining.decrementAndGet() == 0
+                            && finished.compareAndSet(false, true)) {
+                        result.onSuccess(Collections.unmodifiableList(new ArrayList<>(output)));
+                    }
+                }
+
+                @Override
+                public void onFailure(TdApi.Error error) {
+                    if (finished.compareAndSet(false, true)) {
+                        result.onError(String.valueOf(error.code), error.message);
+                    }
+                }
+            });
+        }
     }
 
     @Override
@@ -200,12 +270,12 @@ public final class TdLibTelegramClient implements TelegramClient {
             @Override
             public void onSuccess(TdApi.Object object) {
                 TdApi.Messages messages = (TdApi.Messages) object;
-                ArrayList<TelegramMessage> out = new ArrayList<>(messages.messages.length);
+                ArrayList<TelegramMessage> output = new ArrayList<>(messages.messages.length);
                 for (TdApi.Message message : messages.messages) {
                     TelegramMessage mapped = mapMessage(message);
-                    if (mapped != null) out.add(mapped);
+                    if (mapped != null) output.add(mapped);
                 }
-                result.onSuccess(Collections.unmodifiableList(out));
+                if (result != null) result.onSuccess(Collections.unmodifiableList(output));
             }
 
             @Override
@@ -216,18 +286,19 @@ public final class TdLibTelegramClient implements TelegramClient {
     }
 
     @Override
-    public void sendText(long chatId, String text, TelegramResult<TelegramMessage> result) {
+    public void sendText(long chatId, String text, final TelegramResult<TelegramMessage> result) {
         requireClient();
+
         TdApi.InputMessageText content = new TdApi.InputMessageText();
         content.text = new TdApi.FormattedText(text == null ? "" : text, null);
-        content.disableWebPagePreview = false;
+        content.linkPreviewOptions = null;
         content.clearDraft = true;
 
         TdApi.SendMessage request = new TdApi.SendMessage();
         request.chatId = chatId;
-        request.replyToMessageId = 0;
-        request.disableNotification = false;
-        request.fromBackground = false;
+        request.topicId = null;
+        request.replyTo = null;
+        request.options = null;
         request.replyMarkup = null;
         request.inputMessageContent = content;
 
@@ -245,17 +316,30 @@ public final class TdLibTelegramClient implements TelegramClient {
     }
 
     @Override
-    public void sendPhoto(long chatId, String localPath, String caption, TelegramResult<TelegramMessage> result) {
+    public void sendPhoto(long chatId, String localPath, String caption,
+                          final TelegramResult<TelegramMessage> result) {
         requireClient();
+
+        TdApi.InputPhoto inputPhoto = new TdApi.InputPhoto();
+        inputPhoto.photo = new TdApi.InputFileLocal(localPath);
+        inputPhoto.thumbnail = null;
+        inputPhoto.video = null;
+        inputPhoto.addedStickerFileIds = new int[0];
+        inputPhoto.width = 0;
+        inputPhoto.height = 0;
+
         TdApi.InputMessagePhoto content = new TdApi.InputMessagePhoto();
-        content.photo = new TdApi.InputFileLocal(localPath);
-        content.caption = caption == null ? "" : caption;
+        content.photo = inputPhoto;
+        content.caption = new TdApi.FormattedText(caption == null ? "" : caption, null);
+        content.showCaptionAboveMedia = false;
+        content.selfDestructType = null;
+        content.hasSpoiler = false;
 
         TdApi.SendMessage request = new TdApi.SendMessage();
         request.chatId = chatId;
-        request.replyToMessageId = 0;
-        request.disableNotification = false;
-        request.fromBackground = false;
+        request.topicId = null;
+        request.replyTo = null;
+        request.options = null;
         request.replyMarkup = null;
         request.inputMessageContent = content;
 
@@ -275,11 +359,15 @@ public final class TdLibTelegramClient implements TelegramClient {
     @Override
     public void downloadFile(int fileId, int priority, final TelegramResult<String> result) {
         requireClient();
-        sendRaw(new TdApi.DownloadFile(fileId, priority, 0, 0, false), new ResultAdapter() {
+        sendRaw(new TdApi.DownloadFile(fileId, priority, 0, 0, true), new ResultAdapter() {
             @Override
             public void onSuccess(TdApi.Object object) {
                 TdApi.File file = (TdApi.File) object;
-                result.onSuccess(file.local.path);
+                if (file.local != null && file.local.path != null && !file.local.path.isEmpty()) {
+                    if (result != null) result.onSuccess(file.local.path);
+                } else if (result != null) {
+                    result.onError("FILE_PATH_EMPTY", "TDLib returned an empty local file path");
+                }
             }
 
             @Override
@@ -302,9 +390,9 @@ public final class TdLibTelegramClient implements TelegramClient {
     }
 
     @Override
-    public void viewMessages(long chatId, int[] messageIds) {
+    public void viewMessages(long chatId, long[] messageIds) {
         requireClient();
-        sendRaw(new TdApi.ViewMessages(chatId, messageIds, new TdApi.MessageSourceUnknown(), true), null);
+        sendRaw(new TdApi.ViewMessages(chatId, messageIds, null, true), null);
     }
 
     @Override
@@ -315,8 +403,20 @@ public final class TdLibTelegramClient implements TelegramClient {
 
     @Override
     public synchronized void close() {
+        Client current = client;
+        if (current == null) return;
+        if (authState == TelegramAuthState.CLOSING || authState == TelegramAuthState.CLOSED) return;
+        current.send(new TdApi.Close(), object -> {});
+    }
+
+    private void refreshChat(final long chatId) {
         if (client == null) return;
-        sendRaw(new TdApi.Close(), null);
+        sendRaw(new TdApi.GetChat(chatId), new ResultAdapter() {
+            @Override
+            public void onSuccess(TdApi.Object object) {
+                notifyChat((TdApi.Chat) object);
+            }
+        });
     }
 
     private void requireClient() {
@@ -335,37 +435,42 @@ public final class TdLibTelegramClient implements TelegramClient {
     }
 
     private void notifyChat(TdApi.Chat chat) {
-        if (chat == null) return;
         Listener l = listener;
-        if (l != null) {
-            int topId = chat.topMessage == null ? 0 : chat.topMessage.id;
-            l.onChatChanged(new TelegramChat(chat.id, chat.title, chat.unreadCount, topId));
-        }
+        if (l != null && chat != null) l.onChatChanged(mapChat(chat));
     }
 
     private void notifyMessage(TdApi.Message message) {
-        if (message == null) return;
         TelegramMessage mapped = mapMessage(message);
-        if (mapped != null) {
-            Listener l = listener;
-            if (l != null) l.onMessageChanged(mapped);
+        Listener l = listener;
+        if (mapped != null && l != null) l.onMessageChanged(mapped);
+    }
+
+    private TelegramUser mapUser(TdApi.User user) {
+        String username = "";
+        if (user.usernames != null
+                && user.usernames.activeUsernames != null
+                && user.usernames.activeUsernames.length > 0) {
+            username = user.usernames.activeUsernames[0];
         }
+        return new TelegramUser(user.id, user.firstName, user.lastName, username, user.phoneNumber);
     }
 
     private TelegramChat mapChat(TdApi.Chat chat) {
-        int topId = chat.topMessage == null ? 0 : chat.topMessage.id;
-        return new TelegramChat(chat.id, chat.title, chat.unreadCount, topId);
+        long lastMessageId = chat.lastMessage == null ? 0L : chat.lastMessage.id;
+        return new TelegramChat(chat.id, chat.title, chat.unreadCount, lastMessageId);
     }
 
     private TelegramMessage mapMessage(TdApi.Message message) {
-        long senderUserId = 0;
+        if (message == null) return null;
+        long senderUserId = 0L;
         if (message.senderId instanceof TdApi.MessageSenderUser) {
             senderUserId = ((TdApi.MessageSenderUser) message.senderId).userId;
         }
 
         String text = "";
         if (message.content instanceof TdApi.MessageText) {
-            text = ((TdApi.MessageText) message.content).text.text;
+            TdApi.MessageText messageText = (TdApi.MessageText) message.content;
+            text = messageText.text == null ? "" : messageText.text.text;
         }
 
         return new TelegramMessage(
@@ -382,8 +487,12 @@ public final class TdLibTelegramClient implements TelegramClient {
         if (l != null) l.onError(code, message == null ? "" : message);
     }
 
-    private void sendRaw(TdApi.TLFunction request, final ResultAdapter adapter) {
-        client.send(request, object -> {
+    private <T extends TdApi.Object> void sendRaw(
+            TdApi.Function<T> request, final ResultAdapter adapter) {
+        Client current = client;
+        if (current == null) throw new IllegalStateException("Telegram client is not started");
+
+        current.send(request, object -> {
             if (adapter == null) {
                 if (object instanceof TdApi.Error) {
                     TdApi.Error error = (TdApi.Error) object;
@@ -418,7 +527,7 @@ public final class TdLibTelegramClient implements TelegramClient {
             }
         }
 
-        public abstract void onSuccess(TdApi.Object object);
-        public void onFailure(TdApi.Error error) {}
+        abstract void onSuccess(TdApi.Object object);
+        void onFailure(TdApi.Error error) {}
     }
 }
